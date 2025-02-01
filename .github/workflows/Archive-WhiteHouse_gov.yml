@@ -1,8 +1,9 @@
 name: "Archive URL via Wayback Machine"
 
 on:
+  workflow_dispatch:
   repository_dispatch:
-    types: [workflow_dispatch]
+    types: [archive_url_wayback]
 
 jobs:
   archive_wayback:
