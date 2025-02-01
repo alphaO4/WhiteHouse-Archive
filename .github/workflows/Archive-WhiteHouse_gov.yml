@@ -13,6 +13,9 @@ jobs:
   archive_wayback:
     runs-on: ubuntu-latest
     steps:
+      - env:
+          URL: github.event.inputs.url
+      
       - name: Check out repository
         uses: actions/checkout@v3
 
@@ -51,7 +54,7 @@ jobs:
       - name: Download archived page
         if: steps.save_page.outputs.location_url != ''
         run: |
-          SAFE_FILENAME=$(echo "${{ github.event.client_payload.url }}" \
+          SAFE_FILENAME=$(echo "${{ github.event.inputs.url }}" \
             | sed 's|^https\?://||' \
             | sed 's|[^a-zA-Z0-9._-]|_|g')
           OUTPUT_FILE="archived/wayback_${SAFE_FILENAME}.html"
@@ -67,7 +70,7 @@ jobs:
         run: |
           git add archived
           if ! git diff --quiet --cached; then
-            git commit -m "Wayback archive of ${{ github.event.client_payload.url }}"
+            git commit -m "Wayback archive of ${{ github.event.inputs.url }}"
           fi
 
       - name: Push changes
