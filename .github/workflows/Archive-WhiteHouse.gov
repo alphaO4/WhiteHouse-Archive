@@ -1,0 +1,73 @@
+name: "Archive URL via Wayback Machine"
+
+on:
+  repository_dispatch:
+    types: [archive_url_wayback]
+
+jobs:
+  archive_wayback:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v3
+
+      - name: Set up git
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+      - name: Save page now (Wayback Machine)
+        id: save_page
+        run: |
+          URL="${{ github.event.client_payload.url }}"
+          echo "Archiving URL: $URL"
+
+          # Post the URL to the Save Page Now endpoint
+          # Some setups return a 'Location:' header with the snapshot URL.
+          # We'll store that header to parse it.
+          RESPONSE_HEADERS=$(mktemp)
+          curl -I -X POST "https://web.archive.org/save/$URL" \
+            -H "Accept: application/json" \
+            -o /dev/null -D "$RESPONSE_HEADERS" -s
+
+          # Look for the 'Location:' line in the response headers
+          # which typically has the final archive link:
+          LOCATION=$(grep -i '^Location:' "$RESPONSE_HEADERS" | awk '{print $2}' | tr -d '\r')
+
+          # Fallback if no location found, set to empty
+          if [ -z "$LOCATION" ]; then
+            echo "::warning::No Location header found. The snapshot may be queued or the URL is already archived."
+            # Optionally, we could exit or do something else
+            echo "location_url=" >> $GITHUB_OUTPUT
+          else
+            echo "location_url=$LOCATION" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download archived page
+        if: steps.save_page.outputs.location_url != ''
+        run: |
+          SAFE_FILENAME=$(echo "${{ github.event.client_payload.url }}" \
+            | sed 's|^https\?://||' \
+            | sed 's|[^a-zA-Z0-9._-]|_|g')
+          OUTPUT_FILE="archived/wayback_${SAFE_FILENAME}.html"
+
+          # Download the archived version from the Wayback snapshot
+          curl -sSL "${{ steps.save_page.outputs.location_url }}" \
+            -o "$OUTPUT_FILE"
+
+          echo "Saved archived page to $OUTPUT_FILE"
+
+      - name: Commit changes
+        if: steps.save_page.outputs.location_url != ''
+        run: |
+          git add archived
+          if ! git diff --quiet --cached; then
+            git commit -m "Wayback archive of ${{ github.event.client_payload.url }}"
+          fi
+
+      - name: Push changes
+        if: steps.save_page.outputs.location_url != ''
+        uses: ad-m/github-push-action@v0.6.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ github.ref }}
