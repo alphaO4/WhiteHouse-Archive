@@ -24,7 +24,7 @@ jobs:
       - name: Save page now (Wayback Machine)
         id: save_page
         run: |
-          URL="${{ github.event.client_payload.url }}"
+          URL="${{ github.event.inputs.url }}"
           echo "Archiving URL: $URL"
 
           # Post the URL to the Save Page Now endpoint
