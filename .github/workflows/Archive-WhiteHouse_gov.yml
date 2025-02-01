@@ -69,19 +69,23 @@ jobs:
           if [ -z "$ARCHIVE_URL" ]; then
             ARCHIVE_URL="${{ steps.save_page.outputs.location_url }}"
           fi
-
+      
           if [ -n "$ARCHIVE_URL" ]; then
             SAFE_FILENAME=$(echo "$URL" | sed 's|^https\?://||' | sed 's|[^a-zA-Z0-9._-]|_|g')
             OUTPUT_FILE="archived/wayback_${SAFE_FILENAME}.html"
-
+      
+            # Ensure the 'archived' directory exists
+            mkdir -p archived
+      
             # Download the archived version from the Wayback snapshot
-            curl -sSL "$ARCHIVE_URL" -o "$OUTPUT_FILE"
-
+            curl -fSL "$ARCHIVE_URL" -o "$OUTPUT_FILE"
+      
             echo "Saved archived page to $OUTPUT_FILE"
           else
             echo "::error::Failed to archive or retrieve the URL."
             exit 1
           fi
+
 
       - name: Commit changes
         run: |
