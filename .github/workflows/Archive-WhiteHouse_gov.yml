@@ -3,16 +3,16 @@ name: "Archive URL via Wayback Machine"
 on:
   workflow_dispatch:
     inputs:
-        url:
-          type: string
-          required: true
+      url:
+        type: string
+        required: true
   repository_dispatch:
     types: [archive_url_wayback]
 
 jobs:
   archive_wayback:
     runs-on: ubuntu-latest
-    steps:      
+    steps:
       - name: Check out repository
         uses: actions/checkout@v3
 
@@ -21,51 +21,69 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
+      - name: Check for existing archived page
+        id: check_archive
+        run: |
+          URL="${{ github.event.inputs.url }}"
+          echo "Checking if URL is already archived: $URL"
+
+          # Query the Wayback Machine Availability API
+          RESPONSE=$(curl -s "https://archive.org/wayback/available?url=$URL")
+          ARCHIVE_URL=$(echo "$RESPONSE" | jq -r '.archived_snapshots.closest.url')
+
+          if [ "$ARCHIVE_URL" != "null" ]; then
+            echo "Archived version found: $ARCHIVE_URL"
+            echo "archive_url=$ARCHIVE_URL" >> $GITHUB_OUTPUT
+          else
+            echo "No archived version found."
+            echo "archive_url=" >> $GITHUB_OUTPUT
+          fi
+
       - name: Save page now (Wayback Machine)
-        env:
-          URL: github.event.inputs.url
+        if: steps.check_archive.outputs.archive_url == ''
         id: save_page
         run: |
           URL="${{ github.event.inputs.url }}"
           echo "Archiving URL: $URL"
 
           # Post the URL to the Save Page Now endpoint
-          # Some setups return a 'Location:' header with the snapshot URL.
-          # We'll store that header to parse it.
           RESPONSE_HEADERS=$(mktemp)
           curl -I -X POST "https://web.archive.org/save/$URL" \
             -H "Accept: application/json" \
             -o /dev/null -D "$RESPONSE_HEADERS" -s
 
           # Look for the 'Location:' line in the response headers
-          # which typically has the final archive link:
           LOCATION=$(grep -i '^Location:' "$RESPONSE_HEADERS" | awk '{print $2}' | tr -d '\r')
 
-          # Fallback if no location found, set to empty
           if [ -z "$LOCATION" ]; then
             echo "::warning::No Location header found. The snapshot may be queued or the URL is already archived."
-            # Optionally, we could exit or do something else
             echo "location_url=" >> $GITHUB_OUTPUT
           else
             echo "location_url=$LOCATION" >> $GITHUB_OUTPUT
           fi
 
       - name: Download archived page
-        if: steps.save_page.outputs.location_url != ''
         run: |
-          SAFE_FILENAME=$(echo "${{ github.event.inputs.url }}" \
-            | sed 's|^https\?://||' \
-            | sed 's|[^a-zA-Z0-9._-]|_|g')
-          OUTPUT_FILE="archived/wayback_${SAFE_FILENAME}.html"
+          URL="${{ github.event.inputs.url }}"
+          ARCHIVE_URL="${{ steps.check_archive.outputs.archive_url }}"
+          if [ -z "$ARCHIVE_URL" ]; then
+            ARCHIVE_URL="${{ steps.save_page.outputs.location_url }}"
+          fi
 
-          # Download the archived version from the Wayback snapshot
-          curl -sSL "${{ steps.save_page.outputs.location_url }}" \
-            -o "$OUTPUT_FILE"
+          if [ -n "$ARCHIVE_URL" ]; then
+            SAFE_FILENAME=$(echo "$URL" | sed 's|^https\?://||' | sed 's|[^a-zA-Z0-9._-]|_|g')
+            OUTPUT_FILE="archived/wayback_${SAFE_FILENAME}.html"
 
-          echo "Saved archived page to $OUTPUT_FILE"
+            # Download the archived version from the Wayback snapshot
+            curl -sSL "$ARCHIVE_URL" -o "$OUTPUT_FILE"
+
+            echo "Saved archived page to $OUTPUT_FILE"
+          else
+            echo "::error::Failed to archive or retrieve the URL."
+            exit 1
+          fi
 
       - name: Commit changes
-        if: steps.save_page.outputs.location_url != ''
         run: |
           git add archived
           if ! git diff --quiet --cached; then
@@ -73,7 +91,6 @@ jobs:
           fi
 
       - name: Push changes
-        if: steps.save_page.outputs.location_url != ''
         uses: ad-m/github-push-action@v0.6.0
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
