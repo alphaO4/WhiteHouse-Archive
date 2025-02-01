@@ -12,10 +12,7 @@ on:
 jobs:
   archive_wayback:
     runs-on: ubuntu-latest
-    steps:
-      - env:
-          URL: github.event.inputs.url
-      
+    steps:      
       - name: Check out repository
         uses: actions/checkout@v3
 
@@ -25,6 +22,8 @@ jobs:
           git config user.email "github-actions@github.com"
 
       - name: Save page now (Wayback Machine)
+        env:
+          URL: github.event.inputs.url
         id: save_page
         run: |
           URL="${{ github.event.inputs.url }}"
