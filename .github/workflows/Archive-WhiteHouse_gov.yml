@@ -1,4 +1,6 @@
 name: "Archive URL via Wayback Machine"
+permissions:
+  contents: write
 
 on:
   workflow_dispatch:
