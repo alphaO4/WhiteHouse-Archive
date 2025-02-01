@@ -2,6 +2,10 @@ name: "Archive URL via Wayback Machine"
 
 on:
   workflow_dispatch:
+  inputs:
+      url:
+        type: string
+        required: true
   repository_dispatch:
     types: [archive_url_wayback]
 
