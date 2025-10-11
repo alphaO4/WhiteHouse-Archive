@@ -1,4 +1,4 @@
-name: "Archive URL via Wayback Machine"
+name: "Archive Website via Python Script"
 permissions:
   contents: write
 
@@ -9,91 +9,53 @@ on:
         type: string
         required: true
   repository_dispatch:
-    types: [archive_url_wayback]
+    types: [archive_site_python]
 
 jobs:
-  archive_wayback:
+  archive_python:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4 waybackpy
+
+      - name: Determine archive URL
+        id: archive_url
+        run: |
+          if [ -n "${{ github.event.inputs.url }}" ]; then
+            echo "url=${{ github.event.inputs.url }}" >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ github.event.client_payload.url }}" ]; then
+            echo "url=${{ github.event.client_payload.url }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "No URL provided for archiving." >&2
+            exit 1
+          fi
 
       - name: Set up git
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-      - name: Check for existing archived page
-        id: check_archive
+      - name: Run archive script
+        env:
+          ARCHIVE_USER_AGENT: "Mozilla/5.0 (compatible; WhiteHouseArchiveBot/1.0; +https://github.com/alphaO4/WhiteHouse-Archive)"
         run: |
-          URL="${{ github.event.inputs.url }}"
-          echo "Checking if URL is already archived: $URL"
+          python scripts/archive_site.py --url "${{ steps.archive_url.outputs.url }}"
 
-          # Query the Wayback Machine Availability API
-          RESPONSE=$(curl -s "https://archive.org/wayback/available?url=$URL")
-          ARCHIVE_URL=$(echo "$RESPONSE" | jq -r '.archived_snapshots.closest.url')
-
-          if [ "$ARCHIVE_URL" != "null" ]; then
-            echo "Archived version found: $ARCHIVE_URL"
-            echo "archive_url=$ARCHIVE_URL" >> $GITHUB_OUTPUT
-          else
-            echo "No archived version found."
-            echo "archive_url=" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Save page now (Wayback Machine)
-        if: steps.check_archive.outputs.archive_url == ''
-        id: save_page
-        run: |
-          URL="${{ github.event.inputs.url }}"
-          echo "Archiving URL: $URL"
-
-          # Post the URL to the Save Page Now endpoint
-          RESPONSE_HEADERS=$(mktemp)
-          curl -I -X POST "https://web.archive.org/save/$URL" \
-            -H "Accept: application/json" \
-            -o /dev/null -D "$RESPONSE_HEADERS" -s
-
-          # Look for the 'Location:' line in the response headers
-          LOCATION=$(grep -i '^Location:' "$RESPONSE_HEADERS" | awk '{print $2}' | tr -d '\r')
-
-          if [ -z "$LOCATION" ]; then
-            echo "::warning::No Location header found. The snapshot may be queued or the URL is already archived."
-            echo "location_url=" >> $GITHUB_OUTPUT
-          else
-            echo "location_url=$LOCATION" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Download archived page
-        run: |
-          URL="${{ github.event.inputs.url }}"
-          ARCHIVE_URL="${{ steps.check_archive.outputs.archive_url }}"
-          if [ -z "$ARCHIVE_URL" ]; then
-            ARCHIVE_URL="${{ steps.save_page.outputs.location_url }}"
-          fi
-      
-          if [ -n "$ARCHIVE_URL" ]; then
-            SAFE_FILENAME=$(echo "$URL" | sed 's|^https\?://||' | sed 's|[^a-zA-Z0-9._-]|_|g')
-            OUTPUT_FILE="archived/wayback_${SAFE_FILENAME}.html"
-      
-            # Ensure the 'archived' directory exists
-            mkdir -p archived
-      
-            # Download the archived version from the Wayback snapshot
-            curl -fSL "$ARCHIVE_URL" -o "$OUTPUT_FILE"
-      
-            echo "Saved archived page to $OUTPUT_FILE"
-          else
-            echo "::error::Failed to archive or retrieve the URL."
-            exit 1
-          fi
-
-
-      - name: Commit changes
+      - name: Commit archived pages
         run: |
           git add archived
           if ! git diff --quiet --cached; then
-            git commit -m "Wayback archive of ${{ github.event.inputs.url }}"
+            git commit -m "Archived ${{ github.event.inputs.url }} and its sub-links"
           fi
 
       - name: Push changes
